@@ -1,0 +1,200 @@
+---
+title: "Association Rules Analysis"
+author: "Mark Ruperto"
+date: "2026-03-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+STEP 1: INSTALL PACKAGES
+```{r Loading packages, echo=TRUE}
+library(readxl)
+library(ggplot2)
+library(knitr)
+library(dplyr)
+library(arules)
+library(arulesViz)
+library(ggmosaic)
+library(mosaic)
+library(vcd)
+```
+
+STEP 2: Setup working directory
+```{r Setup working directory, echo=TRUE}
+setwd("/Users/markruperto/Desktop/School/GCU/BIT-446/Topic 3")
+```
+
+STEP 3: Importing data
+```{r Importing data, echo=TRUE}
+polling <- read_excel("Poll2.xlsx")
+
+head(polling)
+
+#Display structure and data types
+str(polling)
+```
+STEP 4: Creating two-dimensional mosaic plots
+```{r Create mosaic plots, echo=TRUE}
+
+options(warn=-1)
+
+#Keep rows where STAT is not missing
+polling_clean <- polling %>%
+  filter(!is.na(STAT))
+
+#Converts column into a factor
+polling_clean$STAT <- factor(polling_clean$STAT)
+
+#Get all variables except STAT
+vars <- setdiff(names(polling_clean), "STAT")
+
+#Loop that goes through each variable name in "vars"
+for (var in vars) {
+  plot_data <- polling_clean %>%
+    filter(!is.na(.data[[var]]))
+  if (nrow(plot_data) == 0) next
+  
+  #Make a temporary column with a simple name
+  plot_data$myvar <- factor(plot_data[[var]])
+  
+  #Counts categories the variable has
+  if (nlevels(plot_data$myvar) < 2) next
+  
+  #Create mosaic plot
+  p <- ggplot(plot_data) +
+    geom_mosaic(aes(x = product(myvar, STAT), fill = STAT)) +
+    labs(
+      title = paste("Mosaic Plot of STAT vs", var),
+      x = var,
+      y = "STAT"
+    ) +
+    theme_minimal()
+  
+  print(p)
+}
+
+#Re-enable warnings
+options(warn = 0)
+```
+STEP 5: Prepare the dataframe for item set and association rules analysis
+```{r Preparation, echo=TRUE}
+#Convert all columns to factor class
+polling_factor <- polling
+
+polling_factor[] <- lapply(polling_factor, as.factor)
+
+#Confirm structure
+str(polling_factor)
+```
+STEP 6: Create itemsets using arules
+```{r Using arules, echo=TRUE}
+#Convert dataframe to transactions
+polling_trans <- as(polling_factor, "transactions")
+
+#Create frequent itemsets
+itemsets <- apriori(
+  polling_trans,
+  parameter = list(
+    target = "frequent itemsets",
+    supp = 0.10,
+    conf = 0.70,
+    minlen = 2,
+    maxlen = 10
+  )
+)
+
+#Inspect itemsets
+arules::inspect(itemsets)
+```
+STEP 7: Inspect the itemsets using inspectDT
+```{r Inspect itemsets, echo=TRUE}
+
+inspectDT(itemsets)
+
+library(htmlwidgets)
+
+#Creating widget
+itemsets_widget <- inspectDT(itemsets)
+saveWidget(itemsets_widget, "itemsets.html", selfcontained = TRUE)
+browseURL("itemsets.html")
+
+```
+STEP 8: Perform association rules analysis focused on STAT as the consequent
+```{r Perform association rules analysis, echo=TRUE}
+
+#Create association rules
+rules <- apriori(
+  polling_trans,
+  parameter = list(
+    supp = 0.05,
+    conf = 0.60,
+    minlen = 1,
+    maxlen = 10
+  ),
+  appearance = list(
+    rhs = grep("^STAT=", itemLabels(polling_trans), value = TRUE),
+    default = "lhs"
+  )
+)
+
+#Keep only rules with lift > 1.3
+rules_stat_lift <- subset(rules, subset = lift > 1.3)
+
+#Inspect resulting rules
+arules::inspect(rules_stat_lift)
+```
+STEP 9: Create scatterplot for each rule
+```{r Create scatterplot, echo=TRUE}
+
+#Scatter lpot
+plot(
+  rules_stat_lift,
+  method = "scatterplot",
+  measure = c("support", "confidence"),
+  shading = "lift"
+)
+```
+STEP 10: Inspect the rules with inspectDT and export to interactive HTML
+```{r Inspect and export to HTML, echo=TRUE}
+
+arules::inspect(rules_stat_lift)
+
+rules_widget <- inspectDT(rules_stat_lift)
+saveWidget(rules_widget, "rules.html", selfcontained = TRUE)
+browseURL("rules.html")
+
+```
+STEP 11: Conclusion
+
+The Poll2 dataset was analyzed using mosaic plots, itemset mining, and association rules to find patterns among the categorical variables, especially the variable STAT. Initially, two-dimensional mosaic plots were created to compare STAT with every other variable in the dataset. These plots was to help visually show how the distribution of STAT changes across different categories. The size and shape of the tiles in the mosaic plots should indicate how common certain combnations are. 
+
+After the visual analysis, the dataset was converted to factor format so it could be used for itemset and association rule analysis. The data was then transformed into transaction form, which allowed the arules package to identify frequent itemsets. Itemsets were generated using a minimum support of 0.10, confidence of 0.70, and itemset lengths between 2 and 10. These itemsets represent combinations of variable categories that appear together frequently in the dataset. This step helped identify common patterns before focusing specifically on rules involving STAT.
+
+Association rules analysis was performed with STAT set as the outcome (right side of the rule). This lets the analysis focus on which combinations of characteristics are associated with STAT. The support and confidence values were adjusted to produce meaningful results, and the rules were filtered to include only those with a lift greater than 1.3. A lift value graeter than 1.3 indicates that the variables in the rule occur together more often than expected by chance, suggesting a stronger relationship.
+
+A scatterplot was created to visualize the rules, using support on the x-axis, confidence on the y-axis, and color to represent lift. Rules with higher confidence and lift are typically more meaningful. Interactive HTML tables of the itemsets and rules were also generated, allowing the results to be sorted and explored easily. Overall, the analysis helped reveal patterns in the data and highlighted which combinations of factors are most strongly associated with STAT.
+
+
